@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>React Suspense 模拟实现</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .demo-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 2px solid #e3f2fd;
+            border-radius: 8px;
+            background: #f8f9fa;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: #666;
+            font-style: italic;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .user-card {
+            background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #c62828;
+        }
+
+        button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+            transition: transform 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+        }
+
+        .code-section {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            overflow-x: auto;
+        }
+
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 6px;
+            font-weight: bold;
+        }
+
+        .status.pending { background: #fff3cd; color: #856404; }
+        .status.resolved { background: #d4edda; color: #155724; }
+        .status.rejected { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 React Suspense 模拟实现</h1>
+        
+        <div class="demo-section">
+            <h3>📊 状态监控</h3>
+            <div id="status" class="status pending">等待操作...</div>
+        </div>
+
+        <div class="demo-section">
+            <h3>🎮 控制面板</h3>
+            <button onclick="loadUser()">加载用户数据</button>
+            <button onclick="loadUserWithError()">模拟加载错误</button>
+            <button onclick="reset()">重置</button>
+        </div>
+
+        <div class="demo-section">
+            <h3>📱 Suspense 容器</h3>
+            <div id="suspense-container">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    准备就绪，点击按钮开始演示...
+                </div>
+            </div>
+        </div>
+
+        <div class="demo-section">
+            <h3>💡 实现原理说明</h3>
+            <div class="code-section">
+                <strong>核心概念：</strong><br>
+                1. Promise 抛出机制：组件抛出 Promise 来暂停渲染<br>
+                2. 错误边界：捕获 Promise 并显示 fallback<br>
+                3. 状态管理：跟踪 Promise 状态并重新渲染<br>
+                4. 缓存机制：避免重复请求相同数据
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 模拟 React Suspense 的核心实现
+        class SuspenseSimulator {
+            constructor(containerId, fallbackElement) {
+                this.container = document.getElementById(containerId);
+                this.fallback = fallbackElement;
+                this.promiseCache = new Map();
+                this.isRendering = false;
+            }
+
+            // 核心方法：渲染组件或显示 fallback
+            render(componentFn, props = {}) {
+                try {
+                    this.isRendering = true;
+                    const result = componentFn(props);
+                    this.container.innerHTML = result;
+                    this.updateStatus('resolved', '✅ 数据加载完成');
+                } catch (error) {
+                    if (this.isPromise(error)) {
+                        // 这是一个 Promise，显示 loading 状态
+                        this.handleSuspense(error, componentFn, props);
+                    } else {
+                        // 这是一个真正的错误
+                        this.handleError(error);
+                    }
+                } finally {
+                    this.isRendering = false;
+                }
+            }
+
+            // 检查是否是 Promise
+            isPromise(obj) {
+                return obj && typeof obj.then === 'function';
+            }
+
+            // 处理 Suspense（Promise 被抛出）
+            handleSuspense(promise, componentFn, props) {
+                this.container.innerHTML = this.fallback;
+                this.updateStatus('pending', '⏳ 正在加载数据...');
+
+                promise.then(() => {
+                    // Promise 完成后重新渲染
+                    this.render(componentFn, props);
+                }).catch(error => {
+                    this.handleError(error);
+                });
+            }
+
+            // 处理错误
+            handleError(error) {
+                this.container.innerHTML = `
+                    <div class="error">
+                        <strong>❌ 加载失败</strong><br>
+                        ${error.message}
+                    </div>
+                `;
+                this.updateStatus('rejected', '❌ 数据加载失败');
+            }
+
+            // 更新状态显示
+            updateStatus(type, message) {
+                const statusEl = document.getElementById('status');
+                statusEl.className = `status ${type}`;
+                statusEl.textContent = message;
+            }
+        }
+
+        // 模拟数据获取工具
+        class DataFetcher {
+            static cache = new Map();
+
+            // 创建一个"可暂停"的资源
+            static createSuspenseResource(key, fetcher) {
+                if (this.cache.has(key)) {
+                    const cached = this.cache.get(key);
+                    if (cached.status === 'resolved') {
+                        return cached.data;
+                    } else if (cached.status === 'rejected') {
+                        throw cached.error;
+                    } else {
+                        // 仍在 pending 状态，抛出 Promise
+                        throw cached.promise;
+                    }
+                }
+
+                // 创建新的 Promise
+                const promise = fetcher().then(
+                    data => {
+                        this.cache.set(key, { status: 'resolved', data });
+                        return data;
+                    },
+                    error => {
+                        this.cache.set(key, { status: 'rejected', error });
+                        throw error;
+                    }
+                );
+
+                this.cache.set(key, { status: 'pending', promise });
+                throw promise; // 关键：抛出 Promise 来暂停组件渲染
+            }
+
+            // 清除缓存
+            static clearCache() {
+                this.cache.clear();
+            }
+        }
+
+        // 模拟异步数据获取
+        function fetchUserData(shouldError = false) {
+            return new Promise((resolve, reject) => {
+                setTimeout(() => {
+                    if (shouldError) {
+                        reject(new Error('网络请求失败，请稍后重试'));
+                    } else {
+                        resolve({
+                            id: Math.floor(Math.random() * 1000),
+                            name: ['张三', '李四', '王五', '赵六'][Math.floor(Math.random() * 4)],
+                            email: 'user@example.com',
+                            avatar: '👨‍💻'
+                        });
+                    }
+                }, Math.random() * 2000 + 1000); // 1-3秒随机延迟
+            });
+        }
+
+        // 使用 Suspense 的组件
+        function UserProfile(props) {
+            // 这里会抛出 Promise（如果数据还没加载完成）
+            const user = DataFetcher.createSuspenseResource(
+                props.userId || 'default-user',
+                () => fetchUserData(props.shouldError)
+            );
+
+            // 只有当数据加载完成后才会执行到这里
+            return `
+                <div class="user-card">
+                    <h3>${user.avatar} ${user.name}</h3>
+                    <p><strong>ID:</strong> ${user.id}</p>
+                    <p><strong>邮箱:</strong> ${user.email}</p>
+                    <p><em>✨ 数据通过 Suspense 异步加载</em></p>
+                </div>
+            `;
+        }
+
+        // 创建 Suspense 实例
+        const suspense = new SuspenseSimulator('suspense-container', `
+            <div class="loading">
+                <div class="spinner"></div>
+                正在加载用户数据，请稍候...
+            </div>
+        `);
+
+        // 演示函数
+        function loadUser() {
+            DataFetcher.clearCache();
+            suspense.render(UserProfile, { userId: `user-${Date.now()}` });
+        }
+
+        function loadUserWithError() {
+            DataFetcher.clearCache();
+            suspense.render(UserProfile, { 
+                userId: `error-user-${Date.now()}`, 
+                shouldError: true 
+            });
+        }
+
+        function reset() {
+            DataFetcher.clearCache();
+            suspense.container.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    准备就绪，点击按钮开始演示...
+                </div>
+            `;
+            suspense.updateStatus('pending', '等待操作...');
+        }
+
+        // 添加一些说明信息
+        console.log(`
+🎯 React Suspense 模拟实现演示
+
+核心原理：
+1. 组件在需要异步数据时抛出 Promise
+2. Suspense 边界捕获 Promise 并显示 fallback UI
+3. Promise 完成后重新渲染组件
+4. 错误边界处理失败情况
+
+这个实现展示了：
+✅ Promise 抛出机制
+✅ 状态管理和缓存
+✅ 错误处理
+✅ 重新渲染逻辑
+        `);
+    </script>
+</body>
+</html>

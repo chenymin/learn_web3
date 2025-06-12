@@ -1,0 +1,4 @@
+backstop_data/*
+node_modules
+.git
+.vscode/*
