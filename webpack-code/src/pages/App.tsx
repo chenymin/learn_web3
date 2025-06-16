@@ -1,18 +1,21 @@
-import { useState } from 'react';
+import { AuthProvider } from './AuthProvider';
+import LoginForm from './LoginForm';
+import Profile from './Profile';
+
 const App = () => {
-  const [data, setData] = useState({ info: '测试数据' });
   console.log('🐻 App component rendered');
   return (
-    <div>
-      <h1
-        className="text-3xl font-bold underline"
-        onClick={() => {
-          setData({ info: '测试数据' });
-        }}
-      >
-        {data.info}
-      </h1>
-    </div>
+    <AuthProvider>
+      <div style={{ padding: '20px' }}>
+        <h1>React useReducer 示例 - 登录状态管理测试</h1>
+        <div style={{ marginBottom: '20px' }}>
+          <LoginForm />
+        </div>
+        <div>
+          <Profile />
+        </div>
+      </div>
+    </AuthProvider>
   );
 };
 App.whyDidYouRender = true;
