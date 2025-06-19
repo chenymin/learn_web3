@@ -21,9 +21,14 @@
   "dependencies": {
     "@metamask/sdk": "^0.33.0",
     "@welldone-software/why-did-you-render": "^10.0.1",
+    "immer": "^10.1.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "tailwindcss": "^4.1.9"
+    "tailwindcss": "^4.1.9",
+    "lucide-react": "^0.515.0",
+    "react-router-dom": "^7.6.2",
+    "cypress": "^14.4.1",
+    "ethers": "^6.14.3"
   },
   "devDependencies": {
     "@soda/friendly-errors-webpack-plugin": "latest",

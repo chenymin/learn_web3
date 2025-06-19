@@ -1,11 +1,16 @@
-import './style.css';
-import './wdyr';
 import { createRoot } from 'react-dom/client';
-import App from './pages/App';
-
+import { BrowserRouter } from 'react-router-dom';
+import './wdyr.tsx';
+import './style.css';
+import App from '@pages/App';
 const container = document.getElementById('app');
-
 if (!container) {
-  throw new Error('No container found');
+  throw new Error('Failed to find the root element');
 }
-createRoot(container).render(<App />);
+const root = createRoot(container);
+
+root.render(
+  <BrowserRouter>
+    <App />
+  </BrowserRouter>,
+);

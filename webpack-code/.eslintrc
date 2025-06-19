@@ -22,5 +22,14 @@
     "sourceType": "module",
     "project": "./tsconfig.eslint.json"
   },
-  "rules": {}
+  "rules": {
+    "import/extensions": [
+      "error",
+      {
+        "ts": "always",
+        "tsx": "always"
+      }
+    ],
+    "@typescript-eslint/no-explicit-any": "off"
+  }
 }
