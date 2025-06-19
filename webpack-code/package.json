@@ -8,7 +8,9 @@
     "client:dev": "webpack --mode development",
     "client:server": "webpack serve --mode development",
     "client:prod": "webpack --mode production",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:e2e": "cypress open",
+    "test": "jest --collectCoverage --reporters default jest-stare",
+    "test:ui": "majestic",
     "test:uidiff": "npx backstop test",
     "lint:fix": "tsc --noEmit & eslint ./src --ext .ts,.tsx,.js --fix",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
@@ -27,7 +29,6 @@
     "tailwindcss": "^4.1.9",
     "lucide-react": "^0.515.0",
     "react-router-dom": "^7.6.2",
-    "cypress": "^14.4.1",
     "ethers": "^6.14.3"
   },
   "devDependencies": {
@@ -64,6 +65,10 @@
     "webpack-bundle-analyzer": "^4.10.2",
     "webpack-cli": "^6.0.1",
     "webpack-dev-server": "^5.2.2",
-    "yargs-parser": "20.2.9"
+    "yargs-parser": "20.2.9",
+    "@swc/jest": "^0.2.38",
+    "@types/jest": "^29.5.14",
+    "majestic": "^1.8.1",
+    "cypress": "^14.4.1"
   }
 }
