@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+</head>
+<body>
+  <div>
+    <h1>immer 简易版实现</h1>
+  </div>
+  <script>
+    /**
+ * 简易版 Immer 实现
+ * 支持核心功能：Proxy 代理、Copy-on-Write、结构共享、嵌套对象处理
+ */
+
+// 用于标识代理对象的 Symbol
+const DRAFT_STATE = Symbol('draft-state');
+const IS_DRAFT = Symbol('is-draft');
+
+// 工具函数：检查是否为对象
+function isObject(value) {
+  return value !== null && typeof value === 'object';
+}
+
+// 工具函数：检查是否为数组
+function isArray(value) {
+  return Array.isArray(value);
+}
+
+// 工具函数：检查是否为纯对象
+function isPlainObject(value) {
+  if (!isObject(value)) return false;
+  if (value.constructor !== Object && value.constructor != null) return false;
+  return true;
+}
+
+// 工具函数：检查是否可以被代理
+function isDraftable(value) {
+  return isArray(value) || isPlainObject(value);
+}
+
+// 工具函数：检查是否为代理对象
+function isDraft(value) {
+  return Boolean(value && value[IS_DRAFT]);
+}
+
+// 工具函数：获取代理对象的状态
+function getDraftState(draft) {
+  return draft[DRAFT_STATE];
+}
+
+/**
+ * Draft 状态类
+ * 管理每个代理对象的状态信息
+ */
+class DraftState {
+  constructor(base, parent, key) {
+    this.base = base;           // 原始对象
+    this.parent = parent;       // 父级状态
+    this.key = key;            // 在父级中的键
+    this.copy = null;          // 复制对象（写时复制）
+    this.modified = false;     // 是否被修改
+    this.assigned = new Set(); // 已赋值的键集合
+    this.finished = false;     // 是否已完成
+    this.finalized = false;    // 是否已最终化
+    this.drafts = new Map();   // 子代理对象缓存
+  }
+
+  // 获取源对象（复制对象或原始对象）
+  get source() {
+    return this.copy || this.base;
+  }
+
+  // 标记为已修改
+  markChanged() {
+    if (!this.modified) {
+      this.modified = true;
+      // 向上传播修改标记
+      if (this.parent) {
+        this.parent.markChanged();
+      }
+    }
+  }
+
+  // 执行写时复制
+  prepareCopy() {
+    if (!this.copy) {
+      this.copy = isArray(this.base) ? [...this.base] : { ...this.base };
+    }
+  }
+}
+
+/**
+ * 创建代理对象
+ */
+function createProxy(base, parent, key) {
+  // 如果不可代理，直接返回
+  if (!isDraftable(base)) {
+    return base;
+  }
+
+  // 如果已经是代理对象，直接返回
+  if (isDraft(base)) {
+    return base;
+  }
+
+  // 创建状态对象
+  const state = new DraftState(base, parent, key);
+
+  // 创建代理
+  const proxy = new Proxy(base, {
+    get(target, prop) {
+      // 返回标识符
+      if (prop === IS_DRAFT) return true;
+      if (prop === DRAFT_STATE) return state;
+
+      const { source, drafts } = state;
+      const value = source[prop];
+
+      // 如果是已缓存的子代理，直接返回
+      if (drafts.has(prop)) {
+        return drafts.get(prop);
+      }
+
+      // 如果值不可代理，直接返回
+      if (!isDraftable(value)) {
+        return value;
+      }
+
+      // 创建子代理并缓存
+      const childDraft = createProxy(value, state, prop);
+      drafts.set(prop, childDraft);
+      return childDraft;
+    },
+
+    set(target, prop, value) {
+      const { base, source } = state;
+      const oldValue = source[prop];
+
+      // 检查值是否真的改变了
+      if (oldValue === value && prop in base) {
+        return true;
+      }
+
+      // 标记为已修改并准备复制
+      state.markChanged();
+      state.prepareCopy();
+      state.assigned.add(prop);
+
+      // 如果设置的是代理对象，需要获取其最终值
+      if (isDraft(value)) {
+        const draftState = getDraftState(value);
+        value = draftState.copy || draftState.base;
+      }
+
+      // 设置值
+      state.copy[prop] = value;
+      return true;
+    },
+
+    deleteProperty(target, prop) {
+      const { base } = state;
+      
+      // 如果原始对象中不存在该属性，无需操作
+      if (!(prop in base)) {
+        return true;
+      }
+
+      // 标记为已修改并准备复制
+      state.markChanged();
+      state.prepareCopy();
+      state.assigned.add(prop);
+
+      // 删除属性
+      delete state.copy[prop];
+      return true;
+    },
+
+    has(target, prop) {
+      const { source } = state;
+      return prop in source;
+    },
+
+    ownKeys(target) {
+      const { source } = state;
+      return Reflect.ownKeys(source);
+    },
+
+    getOwnPropertyDescriptor(target, prop) {
+      const { source } = state;
+      return Reflect.getOwnPropertyDescriptor(source, prop);
+    }
+  });
+
+  return proxy;
+}
+
+/**
+ * 最终化代理对象，生成不可变结果
+ */
+function finalize(draft) {
+  if (!isDraft(draft)) {
+    return draft;
+  }
+
+  const state = getDraftState(draft);
+  
+  // 如果已经最终化，直接返回结果
+  if (state.finalized) {
+    return state.copy || state.base;
+  }
+
+  // 标记为已最终化
+  state.finalized = true;
+
+  // 如果没有修改，返回原始对象（结构共享）
+  if (!state.modified) {
+    return state.base;
+  }
+
+  // 确保有复制对象
+  state.prepareCopy();
+  const result = state.copy;
+
+  // 递归最终化所有子代理
+  state.drafts.forEach((childDraft, key) => {
+    const finalizedChild = finalize(childDraft);
+    if (finalizedChild !== state.base[key]) {
+      result[key] = finalizedChild;
+    }
+  });
+
+  // 冻结结果对象（可选，模拟不可变性）
+  Object.freeze(result);
+  
+  return result;
+}
+
+/**
+ * 主要的 produce 函数
+ */
+function produce(base, recipe) {
+  // 参数校验
+  if (typeof recipe !== 'function') {
+    throw new Error('Recipe must be a function');
+  }
+
+  // 如果 base 不可代理，直接返回（例如基本类型）
+  if (!isDraftable(base)) {
+    const result = recipe(base);
+    return result === undefined ? base : result;
+  }
+
+  // 创建代理对象
+  const draft = createProxy(base);
+
+  // 执行 recipe 函数
+  const result = recipe(draft);
+
+  // 如果 recipe 返回了值，使用返回值
+  if (result !== undefined) {
+    return result;
+  }
+
+  // 否则最终化 draft 并返回
+  return finalize(draft);
+}
+
+/**
+ * 辅助函数：创建草稿状态
+ */
+function createDraft(base) {
+  if (!isDraftable(base)) {
+    throw new Error('Base must be an object or array');
+  }
+  return createProxy(base);
+}
+
+/**
+ * 辅助函数：完成草稿状态
+ */
+function finishDraft(draft) {
+  return finalize(draft);
+}
+
+// 导出 API
+const SimpleImmer = {
+  produce,
+  createDraft,
+  finishDraft,
+  isDraft,
+  
+  // 便捷方法
+  applyPatches: (base, patches) => {
+    // 简化的 patch 应用（实际 Immer 支持 JSON Patch）
+    return produce(base, draft => {
+      patches.forEach(patch => {
+        if (patch.op === 'replace') {
+          const keys = patch.path.split('/').filter(Boolean);
+          let target = draft;
+          for (let i = 0; i < keys.length - 1; i++) {
+            target = target[keys[i]];
+          }
+          target[keys[keys.length - 1]] = patch.value;
+        }
+      });
+    });
+  }
+};
+
+// 测试用例
+function runTests() {
+  console.log('🧪 开始测试简易版 Immer...\n');
+
+  // 测试 1: 基本对象修改
+  console.log('📝 测试 1: 基本对象修改');
+  const baseState = { a: 1, b: { c: 2 } };
+  const newState = SimpleImmer.produce(baseState, draft => {
+    draft.a = 2;
+    draft.b.c = 3;
+  });
+  console.log('原始状态:', baseState);
+  console.log('新状态:', newState);
+  console.log('引用不同:', newState !== baseState);
+  console.log('结构共享 b:', newState.b !== baseState.b);
+  console.log('');
+
+  // 测试 2: 数组操作
+  // console.log('📝 测试 2: 数组操作');
+  // const arrayState = [1, 2, { x: 3 }];
+  // const newArray = SimpleImmer.produce(arrayState, draft => {
+  //   draft.push(4);
+  //   draft[2].x = 30;
+  // });
+  // console.log('原始数组:', arrayState);
+  // console.log('新数组:', newArray);
+  // console.log('引用不同:', newArray !== arrayState);
+  // console.log('');
+
+  // // 测试 3: 无修改时的结构共享
+  // console.log('📝 测试 3: 无修改时的结构共享');
+  // const unchanged = SimpleImmer.produce(baseState, draft => {
+  //   // 不做任何修改
+  // });
+  // console.log('无修改时引用相同:', unchanged === baseState);
+  // console.log('');
+
+  // 测试 4: 复杂嵌套结构
+  // console.log('📝 测试 4: 复杂嵌套结构');
+  // const complexState = {
+  //   users: [
+  //     { id: 1, name: 'John', profile: { age: 30 } },
+  //     { id: 2, name: 'Jane', profile: { age: 25 } }
+  //   ],
+  //   settings: { theme: 'dark' }
+  // };
+  
+  // const newComplex = SimpleImmer.produce(complexState, draft => {
+  //   draft.users[0].profile.age = 31;
+  //   draft.users.push({ id: 3, name: 'Bob', profile: { age: 28 } });
+  // });
+  
+  // console.log('原始复杂状态:', JSON.stringify(complexState, null, 2));
+  // console.log('新复杂状态:', JSON.stringify(newComplex, null, 2));
+  // console.log('settings 结构共享:', newComplex.settings === complexState.settings);
+  // console.log('未修改用户结构共享:', newComplex.users[1] === complexState.users[1]);
+  // console.log('');
+
+  // 测试 5: Draft 检测
+  // console.log('📝 测试 5: Draft 检测');
+  // SimpleImmer.produce(baseState, draft => {
+  //   console.log('是否为 draft:', SimpleImmer.isDraft(draft));
+  //   console.log('嵌套对象是否为 draft:', SimpleImmer.isDraft(draft.b));
+  // });
+  // console.log('');
+
+  console.log('✅ 所有测试完成！');
+}
+
+// 如果在 Node.js 环境中运行测试
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = SimpleImmer;
+  // runTests();
+} else {
+  // 浏览器环境
+  window.SimpleImmer = SimpleImmer;
+}
+
+// 运行测试（取消注释以运行）
+runTests();
+  </script>
+</body>
+</html>
