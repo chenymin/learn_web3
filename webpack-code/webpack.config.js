@@ -6,6 +6,7 @@ const { resolve } = require('path');
 const { CleanWebpackPlugin } = require('clean-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const { ThemedProgressPlugin } = require('themed-progress-plugin');
+const Transform2dToMatrixPlugin = require('./Transform2dToMatrixPlugin');
 
 const _modeflag = _mode === 'production' ? true : false;
 
@@ -72,6 +73,13 @@ const webpackBaseConfig = {
       ignoreOrder: false,
     }),
     new ThemedProgressPlugin(),
+    new Transform2dToMatrixPlugin({
+      // 配置选项（可选）
+      enableInDev: true,        // 开发模式下是否启用
+      test: /\.(css|scss|less)$/,           // 处理的文件类型
+      preserveComments: true,   // 是否保留原始值注释
+      verbose: true             // 是否显示详细日志
+    })
   ]
 }
 

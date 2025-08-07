@@ -39,7 +39,7 @@ const DappPage = () => {
 
   return (
     <>
-      <h1>Dapptest</h1>
+      <h1 className="customer-element">Dapptest</h1>
     </>
   );
 };
