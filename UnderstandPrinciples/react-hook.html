@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+</head>
+<body>
+  <div>
+    简化版本,用于理解React源码中hooks的实现
+    <a href="https://playfulprogramming.com/posts/react-write-hooks-from-scratch">参考链接</a>
+  </div>
+  <div>
+    <p>真实react</p>
+     1. Fiber架构：React源码中hooks挂载在Fiber节点上，这里简化为Component类<br>
+     2. 组件类：React源码中组件类有render方法，这里简化为Compon2. 双缓存机制：React有current和workInProgress两个Fiber树，这里只
+        有单一状态<br>
+     3. 调度系统：React有复杂的调度和更新机制，这里是同步执行<br>
+     4. Hook类型标识：React源码中每个hook有tag标识类型，这里只实现了useState<br>
+     5. 更新队列：React有update队列处理批量更新，这里是直接赋值<br>
+        核心的链表遍历逻辑完全一致：初次渲染创建hook并加入链表，后续渲染
+        按顺序遍历现有hook。这也解释了为什么hooks不能在条件语句中调用 -
+        会破坏链表的固定顺序。
+  </div>
+
+  <script>
+    class Hook {
+  constructor() {
+    this.state = null;
+    this.next = null;
+  }
+}
+// Global state to simulate React's internals
+let currentComponent = null;
+let workInProgressHook = null;
+// Component class to hold hook linked list
+class Component {
+  constructor() {
+    this.hooks = null; // Head of the linked list
+  }
+  render(renderFn) {
+    // Set up for this component's render
+    currentComponent = this;
+    workInProgressHook = this.hooks;
+    
+    // Call the component function
+    const result = renderFn();
+    
+    // Clean up
+    currentComponent = null;
+    workInProgressHook = null;
+    
+    return result;
+  }
+}
+// useState implementation using linked list
+function useState(initialState) {
+  let hook;
+  
+  if (workInProgressHook === null) {
+    // Create new hook and add to linked list
+    hook = new Hook();
+    hook.state = initialState;
+    
+    // Find end of list and append, or set as first hook
+    if (currentComponent.hooks === null) {
+      currentComponent.hooks = hook;
+    } else {
+      let lastHook = currentComponent.hooks;
+      while (lastHook.next !== null) {
+        lastHook = lastHook.next;
+      }
+      lastHook.next = hook;
+    }
+  } else {
+    // Use existing hook from linked list
+    hook = workInProgressHook;
+  }
+  
+  // Move to next hook for subsequent useState calls
+  workInProgressHook = hook.next;
+  
+  const setState = (newState) => {
+    hook.state = newState;
+  };
+  
+  return [hook.state, setState];
+}
+function MyComponent() {
+  const [count, setCount] = useState(1);
+  console.log(count);
+  setCount(count + 1);
+}
+const component = new Component();
+component.render(MyComponent); // 1
+component.render(MyComponent); // 2
+component.render(MyComponent); // 3
+  </script>
+</body>
+</html>
