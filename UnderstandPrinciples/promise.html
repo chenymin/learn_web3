@@ -1,0 +1,213 @@
+<html>
+<head>
+    <title>Understanding Promises</title>
+</head>
+<body>
+    <h1>Understanding Promises in JavaScript</h1>
+    <p>Promises are a way to handle asynchronous operations in JavaScript.</p>
+</body>
+<script> 
+const pending = 'pending'
+const fulfilled = 'fulfilled'
+const rejected = 'rejected'
+let loopRunning = false
+const promiseJobs = []
+let PromiseFulfillReactions = []
+let PromiseRejectReactions = []
+const isFunction = (fn) => typeof fn === 'function'
+
+class XPromise {
+  constructor(executor) {
+    this.PromiseResult = undefined
+    this.PromiseState = pending
+    executor(this.resolve.bind(this), this.reject.bind(this))
+  }
+
+  resolve = (value) => {
+    // 推送到执行队列，或者启动执行队列的循环
+    this.PromiseResult = value
+    this.PromiseState = fulfilled
+    const job = PromiseFulfillReactions.find((item) => item.key === this)
+    if (job) {
+      PromiseFulfillReactions = PromiseFulfillReactions.filter(item => item.key !== this)
+      promiseJobs.push(job.callback)
+    }
+    if (loopRunning === false) {
+      loopRunning = true
+      this.workLoop()
+    }
+  }
+
+  reject = (value) => {
+    this.PromiseResult = value
+    this.PromiseState = rejected
+    const job = PromiseRejectReactions.find(item => item.key === this)
+    
+    if (job) {
+      PromiseRejectReactions = PromiseRejectReactions.filter(item => item.key !== this)
+      promiseJobs.push(job.callback)
+    }
+    if (loopRunning === false) {
+      loopRunning = true
+      this.workLoop()
+    }
+  }
+
+  then = (onResolved, onRejected) => {
+    return new XPromise((resolveNext, rejectNext) => {
+      const _resolved = () => {
+        const value = this.PromiseResult
+        try {
+          if (!isFunction(onResolved)) {
+            resolveNext(value)
+          } else {
+            const res = onResolved(value)
+            if (res instanceof XPromise) {
+              res.then(resolveNext, rejectNext)
+            } else {
+              resolveNext(res)
+            }  
+          }
+        } catch (err) {
+          rejectNext(err)
+        }
+      }
+
+      const _rejected = () => {
+        const value = this.PromiseResult
+        try {
+          if (!isFunction(onRejected)) {
+            rejectNext(value)
+          } else {
+            const res = onRejected(value)
+            if (res instanceof XPromise) {
+              res.then(resolveNext, rejectNext)
+            } else {
+              resolveNext(res)
+            }
+          }
+        } catch (err) {
+          rejectNext(err)
+        }
+      }
+
+      switch(this.PromiseState) {
+        // 状态为 pending 时，收集回调
+        case pending: 
+          PromiseFulfillReactions.push({
+            key: this,
+            callback: _resolved
+          })
+          PromiseRejectReactions.push({
+            key: this,
+            callback: _rejected
+          })
+          break
+        // 状态已经改变了，就直接执行回调
+        case fulfilled:
+          promiseJobs.push(_resolved)
+          break
+        case rejected:
+          promiseJobs.push(_rejected)
+          break
+      }
+    })
+  }
+
+  workLoop = () => {
+    setTimeout(() => {
+      let cb
+      while(cb = promiseJobs.shift()) {
+        cb()
+      }
+      loopRunning = false
+    }, 0)
+  }
+
+  catch = (onRejected) => {
+    return this.then(null, onRejected)
+  }
+
+  // 静态方法：Promise.resolve
+  static resolve(value) {
+    return new XPromise((resolve) => {
+      resolve(value)
+    })
+  }
+
+  // 静态方法：Promise.reject
+  static reject(reason) {
+    return new XPromise((resolve, reject) => {
+      reject(reason)
+    })
+  }
+
+  // 静态方法：Promise.all
+  static all(promises) {
+    return new XPromise((resolve, reject) => {
+      if (!Array.isArray(promises)) {
+        reject(new TypeError('Promise.all expects an array'))
+        return
+      }
+
+      if (promises.length === 0) {
+        resolve([])
+        return
+      }
+
+      const results = []
+      let completedCount = 0
+
+      promises.forEach((promise, index) => {
+        XPromise.resolve(promise).then(
+          (value) => {
+            results[index] = value
+            completedCount++
+            if (completedCount === promises.length) {
+              resolve(results)
+            }
+          },
+          (reason) => {
+            reject(reason)
+          }
+        )
+      })
+    })
+  }
+
+  // 静态方法：Promise.race
+  static race(promises) {
+    return new XPromise((resolve, reject) => {
+      if (!Array.isArray(promises)) {
+        reject(new TypeError('Promise.race expects an array'))
+        return
+      }
+
+      promises.forEach((promise) => {
+        XPromise.resolve(promise).then(resolve, reject)
+      })
+    })
+  }
+}
+
+// 基础使用
+const promise = new XPromise((resolve, reject) => {
+  setTimeout(() => {
+    console.log('Hello World1 setTimeout')
+    resolve('Hello World1')
+  }, 1000)
+})
+
+promise
+  .then(value => {
+    console.log(value) // 'Hello World!'
+    return value.toUpperCase()
+  })
+//   .then(value => {
+//     console.log(value) // 'HELLO WORLD!'
+//   })
+//   .catch(err => {
+//     console.error(err)
+//   })
+</script>
+</html>
