@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Fiber List Demo</title>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script>
+    // ========== 1. 辅助函数：createElement（JSX 编译目标）==========
+    function createElement(type, props, ...children) {
+      return {
+        type,
+        props: {
+          ...props,
+          children: children.map(child =>
+            typeof child === 'object' ? child :
+            // 文本节点
+            { type: 'TEXT_ELEMENT', props: { nodeValue: child } }
+          ),
+        },
+      };
+    }
+
+    // ========== 2. 你的原始 Fiber 实现（已修正 typo）==========
+    let nextUnitOfWork = null;
+    let wipRoot = null;
+    let currentRoot = null;
+    let deletion = [];
+
+    function workLoop(deadline) {
+      let shouldYield = false;
+      while (nextUnitOfWork && !shouldYield) {
+        nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
+        shouldYield = deadline.timeRemaining() < 1;
+      }
+
+      if (!nextUnitOfWork && wipRoot) {
+        commitRoot();
+      }
+
+      requestIdleCallback(workLoop);
+    }
+
+    requestIdleCallback(workLoop);
+
+    function performUnitOfWork(fiber) {
+      if (!fiber.dom) {
+        fiber.dom = createDOM(fiber);
+      }
+
+      const elements = fiber.props.children || [];
+      reconcileChildren(fiber, elements);
+
+      if (fiber.child) {
+        return fiber.child;
+      }
+
+      let nextFiber = fiber;
+      while (nextFiber) {
+        if (nextFiber.sibling) {
+          return nextFiber.sibling;
+        }
+        nextFiber = nextFiber.parent;
+      }
+    }
+
+    function commitRoot() {
+      // 先处理删除
+      deletion.forEach(commitWork);
+      commitWork(wipRoot.child);
+      currentRoot = wipRoot;
+      wipRoot = null;
+      deletion = [];
+    }
+
+    function commitWork(fiber) {
+      if (!fiber) return;
+
+      // 查找有 DOM 节点的父节点
+      let parentFiber = fiber.parent;
+      while (!parentFiber.dom) {
+        parentFiber = parentFiber.parent;
+      }
+      const parentDom = parentFiber.dom;
+      const hasFiberDom = !!fiber.dom;
+
+      switch (fiber.effectTag) {
+        case 'PLACEMENT':
+          if (hasFiberDom) {
+            parentDom.append(fiber.dom);
+            // 新增节点时也需要绑定事件
+            updateDOM(fiber.dom, {}, fiber.props);
+          }
+          break;
+        case 'UPDATE':
+          hasFiberDom && updateDOM(fiber.dom, fiber.alternate.props, fiber.props);
+          break;
+        case 'DELETION':
+          hasFiberDom && deletionCommit(fiber, parentDom);
+          return; // 删除操作不继续遍历子节点
+        default:
+          break;
+      }
+
+      commitWork(fiber.child);
+      commitWork(fiber.sibling);
+    }
+
+    // 修正：递归删除子树（防止残留）
+    function deletionCommit(fiber, parentDom) {
+      if (fiber.dom) {
+        parentDom.removeChild(fiber.dom);
+      } else if (fiber.child) {
+        // 如果当前节点没有 DOM，继续查找子节点
+        deletionCommit(fiber.child, parentDom);
+      }
+    }
+
+    // 修正 typo：nextPorps → nextProps
+    function updateDOM(dom, prevProps, nextProps) {
+      const isEvent = (key) => key.startsWith('on');
+
+      // 移除已不存在的普通属性
+      Object.keys(prevProps)
+        .filter((key) => key !== 'children' && !isEvent(key))
+        .filter((key) => !(key in nextProps)) // 修正拼写
+        .forEach((key) => {
+          dom[key] = '';
+        });
+
+      // 更新/新增普通属性
+      Object.keys(nextProps)
+        .filter((key) => key !== 'children' && !isEvent(key))
+        .filter(
+          (key) => !(key in prevProps) || prevProps[key] !== nextProps[key]
+        )
+        .forEach((key) => {
+          dom[key] = nextProps[key];
+        });
+
+      // 移除旧事件
+      Object.keys(prevProps)
+        .filter(isEvent)
+        .filter(
+          (key) =>
+            !(key in nextProps) || prevProps[key] !== nextProps[key]
+        )
+        .forEach((key) => {
+          const eventType = key.slice(2).toLowerCase();
+          dom.removeEventListener(eventType, prevProps[key]);
+        });
+
+      // 添加新事件
+      Object.keys(nextProps)
+        .filter(isEvent)
+        .filter((key) => prevProps[key] !== nextProps[key])
+        .forEach((key) => {
+          const eventType = key.slice(2).toLowerCase();
+          dom.addEventListener(eventType, nextProps[key]);
+        });
+    }
+
+    function createDOM(fiber) {
+      const dom =
+        fiber.type === 'TEXT_ELEMENT'
+          ? document.createTextNode('')
+          : document.createElement(fiber.type);
+
+      // 处理文本节点内容
+      if (fiber.type === 'TEXT_ELEMENT') {
+        dom.nodeValue = fiber.props.nodeValue;
+      } else {
+        // 遍历 props 设置属性（简化处理）
+        Object.keys(fiber.props).forEach((name) => {
+          if (name === 'children') return;
+          if (name === 'nodeValue') return; // 文本内容已处理
+
+          // 特殊：style 对象
+          if (name === 'style') {
+            Object.assign(dom.style, fiber.props.style);
+          } else if (name.startsWith('on')) {
+            // 事件稍后在 updateDOM 绑定（首次创建时不绑，避免重复）
+          } else {
+            dom[name] = fiber.props[name];
+          }
+        });
+      }
+
+      return dom;
+    }
+
+    function reconcileChildren(wipFiber, elements) {
+      if (!elements) elements = [];
+
+      let index = 0;
+      let oldFiber = wipFiber.alternate && wipFiber.alternate.child;
+      let prevSibling = null;
+
+      while (index < elements.length || oldFiber) {
+        const element = elements[index];
+        const sameType = oldFiber && element && oldFiber.type === element.type;
+
+        let newFiber = null;
+
+        if (sameType) {
+          newFiber = {
+            type: oldFiber.type,
+            props: element.props,
+            dom: oldFiber.dom,
+            parent: wipFiber,
+            alternate: oldFiber,
+            effectTag: 'UPDATE',
+          };
+        }
+
+        if (element && !sameType) {
+          newFiber = {
+            type: element.type,
+            props: element.props,
+            dom: null,
+            parent: wipFiber,
+            alternate: null,
+            effectTag: 'PLACEMENT',
+          };
+        }
+
+        if (oldFiber && !sameType) {
+          oldFiber.effectTag = 'DELETION';
+          deletion.push(oldFiber);
+        }
+
+        if (oldFiber) {
+          oldFiber = oldFiber.sibling;
+        }
+
+        if (index === 0) {
+          wipFiber.child = newFiber;
+        } else if (newFiber) {
+          prevSibling.sibling = newFiber;
+        }
+
+        if (newFiber) {
+          prevSibling = newFiber;
+        }
+
+        index++;
+      }
+    }
+
+    function render(element, container) {
+      wipRoot = {
+        dom: container,
+        props: { children: [element] },
+        alternate: currentRoot,
+      };
+      deletion = [];
+      nextUnitOfWork = wipRoot;
+    }
+
+    const Didact = {
+      render,
+      createElement,
+    };
+
+    // ========== 3. List 渲染 Demo ==========
+    // 初始数据
+    let items = ['🍎 Apple', '🍌 Banana', '🍇 Grape'];
+
+    function App() {
+      return Didact.createElement(
+        'div',
+        { id: 'app' },
+        Didact.createElement('h2', null, 'Fiber List Demo'),
+        Didact.createElement(
+          'button',
+          {
+            onClick: () => {
+              items.push(`🥝 Kiwi #${Date.now()}`);
+              renderList(); // 触发更新
+            },
+          },
+          'Add Item'
+        ),
+        Didact.createElement(
+          'button',
+          {
+            onClick: () => {
+              if (items.length > 0) {
+                items.pop();
+                renderList(); // 触发更新
+              }
+            },
+          },
+          'Remove Item'
+        ),
+        // 渲染列表
+        Didact.createElement(
+          'ul',
+          { style: { marginTop: '10px', listStyle: 'none' } },
+          ...items.map((item, i) =>
+            Didact.createElement(
+              'li',
+              {
+                key: i, // 注意：你的 fiber 实现未用 key，但加上更规范
+                style: {
+                  padding: '8px',
+                  margin: '4px 0',
+                  backgroundColor: '#f0f0f0',
+                  borderRadius: '4px',
+                },
+              },
+              item
+            )
+          )
+        )
+      );
+    }
+
+    function renderList() {
+      Didact.render(App(), document.getElementById('root'));
+    }
+
+    // 首次渲染
+    renderList();
+  </script>
+</body>
+</html>
